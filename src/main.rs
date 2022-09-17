@@ -18,10 +18,11 @@ use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, timeout};
 
 lazy_static! {
-    static ref PROGRESS_STYLE: ProgressStyle =
-        ProgressStyle::with_template("{percent}% <{bar:20.cyan/blue}> {bytes}/{total_bytes} {msg}")
-            .unwrap()
-            .progress_chars("=+-");
+    static ref PROGRESS_STYLE: ProgressStyle = ProgressStyle::with_template(
+        "{percent}% <{bar:20.cyan/blue}> {bytes}/{total_bytes} ({binary_bytes_per_sec}) {wide_msg} {elapsed}/{duration} ({eta} remaining)"
+    )
+    .unwrap()
+    .progress_chars("=+-");
 }
 
 #[derive(Parser, Debug)]
