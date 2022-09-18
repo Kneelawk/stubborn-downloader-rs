@@ -108,7 +108,7 @@ async fn main() -> anyhow::Result<()> {
         {
             Ok(_) => {}
             Err(err) => {
-                writeln!(&term, "{}", err).unwrap();
+                writeln!(&term, "{:#}", err).unwrap();
                 writeln!(&term, "Download error. Retrying...").unwrap();
             }
         }
