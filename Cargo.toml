@@ -1,6 +1,6 @@
 [package]
 name = "stubborn-downloader-rs"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
 authors = ["kneelawk <kneelawk@gmail.com>"]
 description = "Will attempt to restart failed downloads where they left off."
@@ -10,11 +10,12 @@ description = "Will attempt to restart failed downloads where they left off."
 [dependencies]
 anyhow = "^1.0"
 bytes = "^1.2"
-clap = { version = "^3.2", features = ["derive"] }
+clap = { version = "^4.0", features = ["derive"] }
 console = "^0.15"
 futures = "^0.3"
 futures-util = "^0.3"
 indicatif = "^0.17"
 lazy_static = "^1.4"
+regex = { version = "^1.6", features = ["pattern"] }
 reqwest = { version = "^0.11", features = ["gzip", "brotli", "deflate", "stream"] }
 tokio = { version = "1", features = ["full"] }

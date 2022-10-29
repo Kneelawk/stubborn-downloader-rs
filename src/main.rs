@@ -9,6 +9,7 @@ use indicatif::{HumanBytes, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use lazy_static::lazy_static;
 use reqwest::{Client, Url};
 use std::io::Write;
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -16,6 +17,7 @@ use std::time::Duration;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, timeout};
+use regex::Regex;
 
 lazy_static! {
     static ref PROGRESS_STYLE: ProgressStyle = ProgressStyle::with_template(
@@ -23,6 +25,7 @@ lazy_static! {
     )
     .unwrap()
     .progress_chars("=+-");
+    static ref HEADER_DELIMITER: Regex = Regex::new(" ?: ?").unwrap();
 }
 
 #[derive(Parser, Debug)]
@@ -43,6 +46,16 @@ struct Args {
     /// The amount of time to wait before re-opening a stalled connection.
     #[clap(long, value_parser, default_value_t = 60)]
     connection_timeout: u32,
+
+    /// Specifies headers to be passed during the request.
+    #[clap(long)]
+    header: Vec<String>,
+}
+
+/// Struct for holding header key-value pairs.
+struct Header {
+    key: String,
+    value: String,
 }
 
 #[tokio::main]
@@ -51,11 +64,12 @@ async fn main() -> anyhow::Result<()> {
 
     let term = Term::stderr();
 
-    let args = Args::parse();
+    let args: Args = Args::parse();
 
     writeln!(&term, "################").unwrap();
     writeln!(&term, "Download Info:").unwrap();
     writeln!(&term, "URL: {}", &args.url).unwrap();
+    writeln!(&term, "Headers: {:?}", &args.header).unwrap();
     writeln!(&term, "Output file: {}", args.output.to_string_lossy()).unwrap();
     writeln!(&term, "################").unwrap();
 
@@ -65,6 +79,24 @@ async fn main() -> anyhow::Result<()> {
             bail!("Download urls must be in either HTTP or HTTPS");
         }
     }
+
+    let headers = args.header.iter().filter_map(|header_str| {
+        if let Some(header_pair) = header_str.split_once(HEADER_DELIMITER.deref()) {
+            let header = Header {key: header_pair.0.to_string(), value: header_pair.1.to_string()};
+
+            if header.key == "range" {
+                // Ignore 'range' headers
+                writeln!(&term, "# Ignoring range header...").unwrap();
+                None
+            } else {
+                Some(header)
+            }
+        } else {
+            // Issue warning for invalid header formatting
+            writeln!(&term, "# Illegally formatted header: '{}'. Ignoring...", header_str).unwrap();
+            None
+        }
+    }).collect::<Vec<_>>();
 
     let mut output = OpenOptions::new()
         .create_new(true)
@@ -96,6 +128,7 @@ async fn main() -> anyhow::Result<()> {
         match do_download(
             &client,
             args.url.clone(),
+            &headers,
             &mut output,
             connection_timeout,
             term.clone(),
@@ -127,6 +160,7 @@ async fn main() -> anyhow::Result<()> {
 async fn do_download(
     client: &Client,
     url: Url,
+    headers: &[Header],
     output: &mut File,
     connection_timeout: Duration,
     term: Term,
@@ -144,6 +178,10 @@ async fn do_download(
         builder = builder.header("range", format!("bytes={}-", offset));
     }
 
+    for header in headers {
+        builder = builder.header(&header.key, &header.value);
+    }
+
     let res = timeout(connection_timeout, builder.send())
         .await
         .context("Connection timeout")?
@@ -153,6 +191,7 @@ async fn do_download(
         writeln!(&term, "!!!!!!!!!!!!!!!!").unwrap();
         writeln!(&term, "Server gave bad response code: {}", res.status()).unwrap();
         writeln!(&term, "!!!!!!!!!!!!!!!!").unwrap();
+        bar.set_message("Error.");
         *incomplete = false;
         return Ok(());
     }
