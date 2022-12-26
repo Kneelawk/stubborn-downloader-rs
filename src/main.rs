@@ -2,12 +2,16 @@
 
 use anyhow::{bail, Context};
 use bytes::{Buf, Bytes};
-use clap::Parser;
+use clap::builder::{StringValueParser, TypedValueParser, ValueParserFactory};
+use clap::{Arg, Command, Parser};
 use console::Term;
 use futures_util::StreamExt;
 use indicatif::{HumanBytes, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use lazy_static::lazy_static;
+use regex::Regex;
 use reqwest::{Client, Url};
+use std::ffi::OsStr;
+use std::fmt::{Display, Formatter};
 use std::io::Write;
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -17,7 +21,6 @@ use std::time::Duration;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, timeout};
-use regex::Regex;
 
 lazy_static! {
     static ref PROGRESS_STYLE: ProgressStyle = ProgressStyle::with_template(
@@ -28,12 +31,19 @@ lazy_static! {
     static ref HEADER_DELIMITER: Regex = Regex::new(" ?: ?").unwrap();
 }
 
+/// Stubborn-downloader-rs is a re-creation of my stubborn-downloader program in
+/// rust. Stubborn-downloader-rs attempts to re-create the important curl
+/// options.
 #[derive(Parser, Debug)]
 #[clap(author, version, about)]
 struct Args {
     /// Url to download from.
     #[clap(value_parser)]
     url: Url,
+
+    /// Optional headers to send with every request.
+    #[clap(short = 'H', long = "header")]
+    headers: Vec<Header>,
 
     /// File to output to.
     #[clap(short, long, value_parser)]
@@ -46,16 +56,50 @@ struct Args {
     /// The amount of time to wait before re-opening a stalled connection.
     #[clap(long, value_parser, default_value_t = 60)]
     connection_timeout: u32,
-
-    /// Specifies headers to be passed during the request.
-    #[clap(long)]
-    header: Vec<String>,
 }
 
 /// Struct for holding header key-value pairs.
+#[derive(Debug, Clone)]
 struct Header {
     key: String,
     value: String,
+}
+
+impl Display for Header {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(\"{}\": \"{}\")", &self.key, &self.value)
+    }
+}
+
+impl ValueParserFactory for Header {
+    type Parser = SimpleHeaderValueParser;
+
+    fn value_parser() -> Self::Parser {
+        SimpleHeaderValueParser
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct SimpleHeaderValueParser;
+impl TypedValueParser for SimpleHeaderValueParser {
+    type Value = Header;
+
+    fn parse_ref(
+        &self,
+        cmd: &Command,
+        arg: Option<&Arg>,
+        value: &OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        let str = StringValueParser::new().parse_ref(cmd, arg, value)?;
+        let (key, value) = str.split_once(HEADER_DELIMITER.deref()).ok_or_else(|| {
+            clap::Error::raw(clap::error::ErrorKind::ValueValidation, "Header arguments must contain a colon (':') to separate header key from header value.").with_cmd(cmd)
+        })?;
+
+        Ok(Header {
+            key: key.to_string(),
+            value: value.to_string(),
+        })
+    }
 }
 
 #[tokio::main]
@@ -69,7 +113,17 @@ async fn main() -> anyhow::Result<()> {
     writeln!(&term, "################").unwrap();
     writeln!(&term, "Download Info:").unwrap();
     writeln!(&term, "URL: {}", &args.url).unwrap();
-    writeln!(&term, "Headers: {:?}", &args.header).unwrap();
+    writeln!(
+        &term,
+        "Headers: [ {} ]",
+        &args
+            .headers
+            .iter()
+            .map(|h| h.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+    .unwrap();
     writeln!(&term, "Output file: {}", args.output.to_string_lossy()).unwrap();
     writeln!(&term, "################").unwrap();
 
@@ -79,24 +133,18 @@ async fn main() -> anyhow::Result<()> {
             bail!("Download urls must be in either HTTP or HTTPS");
         }
     }
-
-    let headers = args.header.iter().filter_map(|header_str| {
-        if let Some(header_pair) = header_str.split_once(HEADER_DELIMITER.deref()) {
-            let header = Header {key: header_pair.0.to_string(), value: header_pair.1.to_string()};
-
-            if header.key == "range" {
-                // Ignore 'range' headers
-                writeln!(&term, "# Ignoring range header...").unwrap();
-                None
+    let headers: Vec<_> = args
+        .headers
+        .iter()
+        .filter(|header| {
+            if header.key.eq_ignore_ascii_case("range") {
+                writeln!(&term, "# Encountered redundant 'Range' header. Ignoring...").unwrap();
+                false
             } else {
-                Some(header)
+                true
             }
-        } else {
-            // Issue warning for invalid header formatting
-            writeln!(&term, "# Illegally formatted header: '{}'. Ignoring...", header_str).unwrap();
-            None
-        }
-    }).collect::<Vec<_>>();
+        })
+        .collect();
 
     let mut output = OpenOptions::new()
         .create_new(true)
@@ -160,7 +208,7 @@ async fn main() -> anyhow::Result<()> {
 async fn do_download(
     client: &Client,
     url: Url,
-    headers: &[Header],
+    headers: &[&Header],
     output: &mut File,
     connection_timeout: Duration,
     term: Term,
