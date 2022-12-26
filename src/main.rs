@@ -56,6 +56,11 @@ struct Args {
     /// The amount of time to wait before re-opening a stalled connection.
     #[clap(long, value_parser, default_value_t = 60)]
     connection_timeout: u32,
+
+    /// Use an existing output as if it were an incomplete download and add to
+    /// it.
+    #[clap(long)]
+    use_existing: bool,
 }
 
 /// Struct for holding header key-value pairs.
@@ -125,6 +130,7 @@ async fn main() -> anyhow::Result<()> {
     )
     .unwrap();
     writeln!(&term, "Output file: {}", args.output.to_string_lossy()).unwrap();
+    writeln!(&term, "Using existing file: {}", args.use_existing).unwrap();
     writeln!(&term, "################").unwrap();
 
     {
@@ -146,11 +152,13 @@ async fn main() -> anyhow::Result<()> {
         })
         .collect();
 
-    let mut output = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&args.output)
-        .await?;
+    let mut output_open = OpenOptions::new();
+
+    if !args.use_existing {
+        output_open.create_new(true);
+    }
+
+    let mut output = output_open.write(true).open(&args.output).await?;
 
     let connection_timeout = Duration::from_secs(args.connection_timeout as u64);
 
@@ -169,7 +177,13 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let mut full_length = None;
-    let mut offset = 0u64;
+
+    let mut offset = if args.use_existing {
+        output.metadata().await?.len()
+    } else {
+        0u64
+    };
+
     let mut incomplete = true;
 
     while incomplete {
@@ -247,7 +261,7 @@ async fn do_download(
     let length = res.content_length();
     let mut downloaded = 0u64;
     if full_length.is_none() {
-        *full_length = length;
+        *full_length = length.map(|len| *offset + len);
     }
 
     writeln!(&term, "================").unwrap();
