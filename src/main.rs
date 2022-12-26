@@ -11,7 +11,6 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use reqwest::{Client, Url};
 use std::ffi::OsStr;
-use std::fmt::{Display, Formatter};
 use std::io::Write;
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -70,12 +69,6 @@ struct Header {
     value: String,
 }
 
-impl Display for Header {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(\"{}\": \"{}\")", &self.key, &self.value)
-    }
-}
-
 impl ValueParserFactory for Header {
     type Parser = SimpleHeaderValueParser;
 
@@ -118,17 +111,12 @@ async fn main() -> anyhow::Result<()> {
     writeln!(&term, "################").unwrap();
     writeln!(&term, "Download Info:").unwrap();
     writeln!(&term, "URL: {}", &args.url).unwrap();
-    writeln!(
-        &term,
-        "Headers: [ {} ]",
-        &args
-            .headers
-            .iter()
-            .map(|h| h.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
-    .unwrap();
+
+    writeln!(&term, "Headers:").unwrap();
+    for header in args.headers.iter() {
+        writeln!(&term, "    {}: {}", header.key, header.value).unwrap();
+    }
+
     writeln!(&term, "Output file: {}", args.output.to_string_lossy()).unwrap();
     writeln!(&term, "Using existing file: {}", args.use_existing).unwrap();
     writeln!(&term, "################").unwrap();
