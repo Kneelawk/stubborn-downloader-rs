@@ -142,7 +142,9 @@ async fn main() -> anyhow::Result<()> {
 
     let mut output_open = OpenOptions::new();
 
-    if !args.use_existing {
+    if args.use_existing {
+        output_open.append(true);
+    } else {
         output_open.create_new(true);
     }
 
