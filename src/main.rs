@@ -1,5 +1,3 @@
-#![feature(is_some_with)]
-
 use anyhow::{bail, Context};
 use bytes::{Buf, Bytes};
 use clap::builder::{StringValueParser, TypedValueParser, ValueParserFactory};
@@ -293,7 +291,7 @@ async fn do_download(
         bar.set_position(*offset);
     }
 
-    if length.is_some_and(|&length| downloaded < length) {
+    if length.is_some_and(|length| downloaded < length) {
         bail!("Incomplete download");
     } else {
         writeln!(&term, "Download complete!").unwrap();
